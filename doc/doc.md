@@ -4,35 +4,28 @@
 
 ## Prerequisites
 
-- Claude Code CLI installed with access to the skills directory
-- Git >= 2.23 (for `git diff --cached` and modern diff behavior)
-- Target project must be a Git repository
+- An agent harness that loads `SKILL.md` skills and can run shell commands
+- Git (with `git diff --cached`, `git status --short`, and `git branch --show-current`)
+- The target project must be a Git repository
 
 ## Installation
 
-### Into User Skills Directory
+`<skills-dir>` is the skill directory your harness scans.
+
+### Clone from GitHub
 
 ```bash
-mkdir -p ~/.claude/skills
-git clone https://github.com/pardnchiu/skill-commit-generate.git \
-    ~/.claude/skills/commit-generate
-```
-
-### Into Project Skills Directory
-
-```bash
-mkdir -p <project>/.claude/skills
-git clone https://github.com/pardnchiu/skill-commit-generate.git \
-    <project>/.claude/skills/commit-generate
+git clone https://github.com/agenvoy/skill-commit-generate.git \
+    <skills-dir>/commit-generate
 ```
 
 ### Verify Installation
 
 ```bash
-ls ~/.claude/skills/commit-generate/SKILL.md
+ls <skills-dir>/commit-generate/SKILL.md
 ```
 
-Restart Claude Code; invoke via `/commit-generate`.
+Invoke it from your harness with `/commit-generate`.
 
 ## Usage
 
@@ -42,7 +35,7 @@ Restart Claude Code; invoke via `/commit-generate`.
 # 1. Stage the files you want in the commit
 git add <file1> <file2>
 
-# 2. Invoke the skill from Claude Code
+# 2. Invoke the skill from your harness
 /commit-generate
 ```
 
@@ -53,9 +46,24 @@ feat: Add Docker environment auto-detection and database path switching
 feat: 新增 Docker 環境自動偵測與資料庫路徑切換機制
 ```
 
+The skill only prints the message; it never runs `git commit`.
+
+### Unstaged File Reminder
+
+Files in the same module as the staged ones but still at ` M` are listed above the message:
+
+```
+⚠️ Unstaged files in the same module: internal/auth/token.go
+
+fix: Fix token expiration not handled correctly during user login
+fix: 修正使用者登入時 token 過期未正確處理的問題
+```
+
+The message still describes only the staged content.
+
 ### Multi-Topic Changes
 
-When the staged diff crosses unrelated modules or touches 2+ primary tags:
+When the staged diff spans unrelated modules or touches 2+ primary tags:
 
 ```
 ⚠️ Multi-topic change detected; consider splitting into multiple commits:
@@ -73,7 +81,18 @@ refactor: 重構認證模組並調整 UI 樣式
 No staged changes. Run `git add` first to select files to commit.
 ```
 
-## Reference
+## Configuration Reference
+
+### Data Sources
+
+| Command | Purpose | Scope of Influence |
+|---------|---------|--------------------|
+| `git diff --cached` | Changes to describe | Sole content source |
+| `git status --short` | Find same-module files left unstaged | Reminder only |
+| `git log --oneline -10` | Existing tag vocabulary and granularity | Wording only |
+| `git branch --show-current` | Intent carried by the branch name | Wording only |
+
+The four reads are independent and run in parallel. `git log` and the branch name never change the tag choice; the rules win whenever they conflict.
 
 ### Classification Tags
 
@@ -118,11 +137,11 @@ BREAKING > FEAT > FIX > SECURITY > UPDATE > REFACTOR > PERF > others
 | Injection | SQL / XSS / Command / LDAP / Template injection |
 | AuthZ | Missing auth check, privilege escalation, JWT validation gap |
 | Sensitive data | Remove secrets, tokens, or PII from log / response / error message |
-| Hardcoding | Remove hardcoded tokens, default passwords, API keys |
+| Hardcoding | Remove hardcoded secrets, tokens, default passwords |
 | Web security | CSRF / CORS / CSP / HSTS patches |
 | CVE | Dependency CVE patches (upgraded from `chore: upgrade` to `security`) |
 
-### Multi-Topic Detection Criteria
+### Multi-Topic Criteria
 
 Any one of the following triggers detection:
 
@@ -132,19 +151,12 @@ Any one of the following triggers detection:
 
 Formatting, comment-only tweaks, and dependency bumps can ride along with the primary commit and do not count as multi-topic.
 
-### Output Format
-
-```
-tag: English one-line description
-tag: 繁體中文一句話描述
-```
-
-### Format Rules
+### Output Format Rules
 
 | Rule | Description |
 |------|-------------|
 | Single tag | Pick the tag that best represents the core intent |
-| English subject | Imperative mood, <= 72 chars (Add / Fix / Refactor / Remove / Update) |
-| Traditional Chinese body | <= 50 chars, verb-first (新增 / 修正 / 重構 / 移除 / 優化) |
+| English subject | Imperative mood, at most 72 characters |
+| Traditional Chinese body | At most 50 characters, verb-first (新增 / 修正 / 重構 / 移除 / 優化) |
 | Merge related changes | Roll small edits into a single description |
-| Single topic first | One intent per commit; warn before rolling up multi-topic changes |
+| Single topic first | Warn and suggest a split before any multi-topic rollup |

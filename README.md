@@ -14,7 +14,7 @@
 
 ***
 
-> A Claude Code skill that generates bilingual commit messages from staged diff with mandatory tag escalation and multi-topic detection
+> An agent skill with bilingual commit messages, mandatory tag escalation, and multi-topic split detection
 
 ## Table of Contents
 
@@ -26,11 +26,11 @@
 
 > `/commit-generate` · [Documentation](./doc/doc.md)
 
-- **Bilingual One-Shot Output** — Emits English subject and Traditional Chinese body in a single pass so the two never drift apart.
-- **Staged-Only Strict Input** — Reads only `git diff --cached`; aborts with an error when nothing is staged instead of silently falling back to the working tree.
-- **Mandatory Tag Escalation** — Scans Breaking and Security signals; any hit forces the tag up and blocks downgrades to `feat` or `update`.
-- **Multi-Topic Detection** — Warns and recommends splitting when a diff touches 2+ primary tags or 3+ unrelated topics before emitting a rollup message.
-- **13 Classification Tags** — Resolves intent through a fixed priority of `BREAKING` > `FEAT` > `FIX` > `SECURITY` > `UPDATE` > `REFACTOR` > `PERF`.
+- **Staged-Only Content** — Describes nothing but `git diff --cached` and stops with an error when nothing is staged, never falling back to the working tree.
+- **Mandatory Tag Escalation** — Scans Breaking and Security signals top-down; any hit forces the tag up and blocks downgrades to `feat` or `update`.
+- **Multi-Topic Split Detection** — Lists a split plan before the rollup message when a diff spans 2+ primary tags or 3+ unrelated topics.
+- **Unstaged File Reminder** — Flags same-module files left unstaged above the message, leaving the `git add` decision to the user.
+- **Repo-Consistent Wording** — Borrows module names and phrasing from `git log` and the branch name while tag choice stays rule-driven.
 
 ## Architecture
 
@@ -38,8 +38,8 @@
 
 ```mermaid
 graph TB
-    A[git diff --cached] --> B{Staged empty?}
-    B -->|Yes| E[Error & stop]
+    A[Parallel read<br/>diff / status / log / branch] --> B{Staged empty?}
+    B -->|Yes| E[Error and stop]
     B -->|No| C[Multi-topic detection]
     C --> D[Tag escalation scan]
     D --> F[Emit bilingual commit message]

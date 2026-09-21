@@ -2,72 +2,76 @@
 
 > 返回 [README](./README.zh.md)
 
-## Overview
+## 概覽
 
 ```mermaid
 graph TB
-    User[使用者呼叫 /commit-generate] --> Skill[SKILL.md 指令集]
-    Skill --> Input[Input 層]
-    Skill --> Detect[Multi-Topic Detection]
-    Skill --> Upgrade[Tag Upgrade Signals]
-    Skill --> Tags[Classification Tags]
-    Skill --> Format[Output Format]
-    Input --> Git[git diff --cached]
-    Git --> Output[雙語 commit message]
-    Detect --> Output
-    Upgrade --> Output
-    Tags --> Output
+    User[使用者呼叫 /commit-generate] --> Skill[SKILL.md 規則]
+    Skill --> Input[輸入層<br/>並行讀取四份資料]
+    Input --> Diff[git diff --cached<br/>內容來源]
+    Input --> Status[git status --short<br/>漏 stage 提醒]
+    Input --> Context[git log / branch<br/>用詞參考]
+    Diff --> Detect[跨主題偵測]
+    Detect --> Upgrade[Tag 升級訊號]
+    Upgrade --> Tags[Tag 優先序]
+    Tags --> Format[輸出格式規則]
+    Status --> Output[雙語 commit message]
+    Context --> Format
     Format --> Output
 ```
 
-## Module: Input
+## Module: 輸入層
 
-負責取得並驗證 staged diff。無 staged 時直接終止，不 fallback 至工作區。
+同一輪並行讀取四份資料；diff 為空時直接報錯停止，不回退到工作區。
 
 ```mermaid
 graph TB
-    subgraph Input
-        A[執行 git diff --cached] --> B{輸出是否為空}
+    subgraph Input[輸入層]
+        A[git diff --cached] --> B{輸出為空?}
+        S[git status --short] --> R[比對同模組未 stage 檔案]
+        L[git log --oneline -10] --> W[用詞參考]
+        Br[git branch --show-current] --> W
         B -->|是| C[輸出錯誤訊息]
-        B -->|否| D[傳遞 diff 至後續階段]
+        B -->|否| D[交給跨主題偵測]
     end
     C --> Stop[停止]
-    D --> Next[Multi-Topic Detection]
+    R --> Reminder[message 前的提醒行]
+    W --> Wording[模組稱呼與措辭]
 ```
 
-## Module: Multi-Topic Detection
+## Module: 跨主題偵測
 
-判斷單一 diff 是否混合多個不相關意圖，若命中則要求警示拆分。
+判斷單次 diff 是否混雜無關意圖，命中則輸出拆分建議。
 
 ```mermaid
 graph TB
-    subgraph MultiTopic[Multi-Topic Detection]
-        A[接收 diff] --> B{觸及 2+ primary tag?}
-        A --> C{橫跨 2+ 無關模組?}
-        A --> D{包含 3+ 無關主題?}
-        B -->|任一為真| E[標記為跨主題]
-        C -->|任一為真| E
-        D -->|任一為真| E
-        B -->|皆否| F[標記為單一主題]
-        C -->|皆否| F
-        D -->|皆否| F
+    subgraph MultiTopic[跨主題偵測]
+        A[接收 diff] --> B{觸及 2 個以上主要 Tag?}
+        A --> C{橫跨 2 個以上無關模組?}
+        A --> D{包含 3 個以上無關主題?}
+        B -->|任一為是| E[標記為跨主題]
+        C -->|任一為是| E
+        D -->|任一為是| E
+        B -->|皆為否| F[標記為單一主題]
+        C -->|皆為否| F
+        D -->|皆為否| F
     end
     E --> SplitWarn[輸出拆分建議]
-    F --> Upgrade[Tag Upgrade Scan]
+    F --> Upgrade[Tag 升級掃描]
     SplitWarn --> Upgrade
 ```
 
-## Module: Tag Upgrade Signals
+## Module: Tag 升級訊號
 
-由上而下掃描訊號，命中即強制升級 Tag，禁止降級為 feat / update。
+由上而下掃描訊號，命中即強制升級並禁止降級為 `feat` 或 `update`。
 
 ```mermaid
 graph TB
-    subgraph Upgrade[Tag Upgrade Signals]
-        A[接收 diff] --> B{命中 Breaking Signals?}
-        B -->|是| C[強制 tag = breaking]
-        B -->|否| D{命中 Security Signals?}
-        D -->|是| E[強制 tag = security]
+    subgraph Upgrade[Tag 升級訊號]
+        A[接收 diff] --> B{命中 Breaking 訊號?}
+        B -->|是| C[Tag = breaking]
+        B -->|否| D{命中 Security 訊號?}
+        D -->|是| E[Tag = security]
         D -->|否| F[依 Tag 優先序匹配意圖]
     end
     C --> Out[輸出 Tag]
@@ -75,74 +79,66 @@ graph TB
     F --> Out
 ```
 
-## Module: Classification Tags
+## Module: 輸出格式
 
-最終 Tag 選擇依固定優先序決議。
+以單一 Tag 組出英文 subject 與繁體中文 body。
 
 ```mermaid
 graph LR
-    subgraph Priority[Tag 優先序]
-        BREAKING --> FEAT --> FIX --> SECURITY --> UPDATE --> REFACTOR --> PERF --> OTHERS
+    subgraph Format[輸出格式]
+        T[Tag] --> EN[英文 subject<br/>imperative、≤ 72 字元]
+        T --> ZH[繁體中文 body<br/>動詞開頭、≤ 50 字]
     end
-    OTHERS --> Pool[add / remove / style / doc / test / chore]
+    EN --> Msg[tag: English description<br/>tag: 中文描述]
+    ZH --> Msg
 ```
 
-## Module: Output Format
-
-固定雙行格式，第一行英文 subject、第二行繁體中文 body。
-
-```mermaid
-graph TB
-    subgraph Output[Output Format]
-        Tag[決議 Tag] --> Line1[tag: English imperative subject]
-        Tag --> Line2[tag: 繁體中文動詞開頭描述]
-        Line1 --> Final[純文字輸出]
-        Line2 --> Final
-    end
-```
-
-## Data Flow
+## 資料流
 
 ```mermaid
 sequenceDiagram
     participant User as 使用者
-    participant Skill as commit-generate
-    participant Git as Git
-    User->>Skill: /commit-generate
-    Skill->>Git: git diff --cached
-    Git-->>Skill: staged diff
-    alt Diff 為空
-        Skill-->>User: 錯誤：請先 git add
-    else
-        Skill->>Skill: Multi-Topic Detection
-        alt 跨主題
-            Skill-->>User: 警示拆分建議
+    participant Agent as Agent Harness
+    participant Skill as SKILL.md
+    participant Git
+
+    User->>Git: git add <files>
+    User->>Agent: /commit-generate
+    Agent->>Skill: 載入 skill 定義
+    par 並行讀取
+        Skill->>Git: git diff --cached
+        Skill->>Git: git status --short
+        Skill->>Git: git log --oneline -10
+        Skill->>Git: git branch --show-current
+    end
+    Git-->>Skill: 四份結果
+    alt diff 為空
+        Skill-->>User: 目前沒有 staged 變更
+    else diff 非空
+        Skill->>Skill: 跨主題偵測
+        Skill->>Skill: Tag 升級掃描
+        Skill->>Skill: 套用輸出格式
+        opt 同模組有未 stage 檔案
+            Skill-->>User: 提醒行
         end
-        Skill->>Skill: Tag Upgrade Scan
-        Skill->>Skill: 匹配 Classification Tag
-        Skill->>Skill: 套用 Output Format
+        opt 跨主題
+            Skill-->>User: 拆分建議
+        end
         Skill-->>User: 雙語 commit message
     end
 ```
 
-## State Machine
+## Tag 決策狀態機
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Idle
-    Idle --> ReadDiff: 觸發
-    ReadDiff --> Empty: diff 為空
-    Empty --> [*]: 輸出錯誤
-    ReadDiff --> Detect: diff 存在
-    Detect --> MultiTopic: 跨主題命中
-    Detect --> SingleTopic: 單一主題
-    MultiTopic --> Upgrade: 輸出拆分建議後繼續
-    SingleTopic --> Upgrade
-    Upgrade --> BreakingTag: Breaking 命中
-    Upgrade --> SecurityTag: Security 命中
-    Upgrade --> DefaultTag: 皆未命中
-    BreakingTag --> Emit
-    SecurityTag --> Emit
-    DefaultTag --> Emit
-    Emit --> [*]
+    [*] --> ScanBreaking
+    ScanBreaking --> Breaking: 命中 Breaking 訊號
+    ScanBreaking --> ScanSecurity: 未命中
+    ScanSecurity --> Security: 命中 Security 訊號
+    ScanSecurity --> MatchIntent: 未命中
+    MatchIntent --> Resolved: 依優先序選出 Tag
+    Breaking --> Resolved
+    Security --> Resolved
+    Resolved --> [*]
 ```
